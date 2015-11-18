@@ -62,7 +62,7 @@ async_mod_async(VALUE klass, VALUE method_name)
 
     asyncify(umethod, iseq_from_iseqw(new_iseqw));
 
-    rb_funcall(klass, rb_intern("define_method"), 2, method_name, umethod);
+    // rb_funcall(klass, rb_intern("define_method"), 2, method_name, umethod);
 
     return method_name;
 }
