@@ -51,7 +51,7 @@ class Example
 
   def simple_job(name, mx)
     log 1, name
-    AsyncTask.new {
+    Async::Task.new {
       res = 0
       mx.times { |i|
         log 2, name + "/idx=" + i.to_s

@@ -1,41 +1,12 @@
 require "async/version"
+require "async/task"
 require "async/ext"
 require "pp"
 
-class AsyncTask
-  def initialize(*args, &blk)
-    @thread = Thread.new(*args) { |*args|
-      res = yield *args
-      @completed = true
-      res
-    }
-    @completed = false
-  end
-
-  def wait
-    @thread.value
-  end
-
-  def continue_with
-    AsyncTask.new {
-      yield wait
-    }
-  end
-
-  def completed?
-    @completed
-  end
-end
-
 module Kernel
+  # await in await-block
   def await(task)
     task.wait
-  end
-
-  def __async_task(task)
-    task.continue_with { |res|
-      yield res
-    }
   end
 end
 
@@ -91,10 +62,14 @@ module Async
           [:leave],
         ]
       ]
-
     mupp(inner, 0)
     inner[13].insert(2, [:getlocal_OP__WC__0, 2]) # block param
-    ary[13].insert(ai, [:send, { mid: :__async_task, flag: 4, orig_argc: 1}, false, inner])
+
+    #    ... self task -> swap
+    # -> ... task self -> pop
+    # -> ... task -> send
+    # -> ...
+    ary[13].insert(ai, [:swap], [:pop], [:send, { mid: :continue_with, flag: 4, orig_argc: 0}, false, inner])
   end
 
   def self.mupp(ary, level)
