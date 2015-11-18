@@ -105,7 +105,7 @@ Init_ext(void)
 {
     rb_define_private_method(rb_cModule, "async", mod_async, 1);
     rb_define_private_method(rb_mKernel, "async", kern_async, -1);
-    rb_define_private_method(rb_mKernel, "await", kern_await, 1);
+    // rb_define_private_method(rb_mKernel, "await", kern_await, 1);
 
     mAsync = rb_define_module("Async");
     cAsyncTask = rb_define_class_under(mAsync, "Task", rb_cObject);

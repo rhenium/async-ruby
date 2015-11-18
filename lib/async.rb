@@ -3,100 +3,93 @@ require "async/task"
 require "async/ext"
 require "pp"
 
-#module Kernel
-#  def async(&block)
-#    raise ArgumentError, "block must be given" unless block_given?
-#    asyncify(block)
-#  end
-#end
-
 module Async
   def self.transform(array)
+    # TODO: is really the await?
     await_index = array[13].index { |ins|
       ins.is_a?(Array) &&
         (ins[0] == :opt_send_without_block || ins[0] == :send) &&
         ins[1][:mid] == :await
     }
-    return false unless await_index
 
-    uniuni(array, await_index)
-    pp array
+    transform_(array, await_index) if await_index
 
-    return true
+    await_index
   end
 
-  def self.uniuni(ary, ai)
-    unopt(ary)
+  def self.transform_(ary, ai)
+    line_number = ary[13].take(ai).reverse.find { |i| i.is_a?(Fixnum) }
 
-    inner_tmp = ary[13].slice!(ai...(ary[13].rindex([:trace, 16]) || ary[13].rindex([:trace, 512]) || ary[13].rindex([:leave])))
-    inner_tmp.shift(1) # send
+    inner_end_i = ary[13].rindex { |i| i.is_a?(Array) && i != [:trace, 16] && i != [:trace, 512] && i != [:leave] }
+    inner_body = ary[13].slice!(ai..inner_end_i)
+    inner_body.shift(1) # remove send :await
 
-    # catch table
     inner_ctable = []
-    ary[12].map! { |cc| # [type, iseq?, start, end, cont, sp]
-      next cc unless cc[2..4].any? { |c| inner_tmp.include?(c) }
-      unless cc[2..4].all? { |c| inner_tmp.include?(c) }
+    ary[12].reject! { |cc| # [type, iseq?, start, end, cont, sp]
+      if cc[2..4].all? { |c| inner_body.include?(c) }
+        inner_ctable << cc
+      elsif cc[2..4].any? { |c| inner_body.include?(c) }
         raise SyntaxError, "async currently doesn't support catching across await-kw"
       end
-      inner_ctable << cc
-      nil
-    }.compact!
-    line_number = ary[13].take(ai).reverse.find { |i| i.is_a?(Fixnum) }
-    inner =
+    }
+
+    inner = [
+      *ary.take(4),
+      { arg_size: 1, local_size: 2, stack_max: ary[4][:stack_max] }, # 正確に計算するのはめんどい
+      "await in #{ary[5]}",
+      ary[6], # file name
+      ary[7], # file path
+      line_number, # line number
+      :block,
+      [:"#{"await_result"}"], # param
+      { lead_num: 1 },
+      inner_ctable,
       [
-        *ary.take(4),
-        {:arg_size=>1, :local_size=>2, :stack_max=>ary[4][:stack_max]},
-        "await in #{ary[5]}", # pos text
-        ary[6], # file name
-        ary[7], # file path
-        line_number, # line number
-        :block,
-        [:"#{"await_data"}"],
-        {:lead_num=>1, :ambiguous_param0=>true},
-        inner_ctable,
-        [
-          line_number,
-          [:trace, 256],
-          *inner_tmp,
-          [:trace, 512],
-          [:leave],
-        ]
+        line_number,
+        [:trace, 256], # RUBY_EVENT_B_CALL
+        *inner_body,
+        [:trace, 512], # RUBY_EVENT_B_RETURN
+        [:leave],
       ]
-    mupp(inner, 0)
-    transform(inner)
+    ]
+
+    fixlocal(inner, 0)
     inner[13].insert(2, [:getlocal_OP__WC__0, 2]) # block param
+
+    transform(inner) # next await in same level
 
     #    ... self task -> swap
     # -> ... task self -> pop
     # -> ... task -> send
     # -> ...
-    ary[13].insert(ai, [:swap], [:pop], [:send, { mid: :continue_with, flag: 4, orig_argc: 0}, false, inner])
+    ary[13].insert(ai, [:swap], [:pop], [:send, { mid: :continue_with, flag: 4, orig_argc: 0 }, false, inner])
   end
 
-  def self.mupp(ary, level)
+  def self.fixlocal(ary, level)
     # body
-    mup(ary, level)
+    fixlocal_(ary, level)
     # catch
     ary[12].each { |cc| # catch iseq
-      mup(cc[1], level) if cc[1]
+      fixlocal_(cc[1], level) if cc[1]
     }
     # sub iseq in body
     ary[13].each { |ins|
       next unless ins.is_a?(Array)
-      case ins[0]
-      when :send, :invokesuper
-        mupp(ins[3], level + 1) if ins[3]
-      when :putiseq
-        mupp(ins[1], level + 1)
-      when :once
-        # mupp(ins[1], level + 1) # わからん
-      when :defineclass
-        # mupp(ins[2], level + 1) # わからん
-      end
+      iseq = case ins[0]
+             when :send, :invokesuper
+               ins[3]
+             when :putiseq
+               ins[1]
+             when :once
+               # mupp(ins[1], level + 1) # わからん
+             when :defineclass
+               # mupp(ins[2], level + 1) # わからん
+             end
+      fixlocal(iseq, level + 1) if iseq
     }
   end
 
-  def self.mup(ary, level)
+  def self.fixlocal_(ary, level)
     unopt(ary)
     ary[13].map! { |ins|
       if ins.is_a?(Array) && [:setlocal, :getlocal].include?(ins[0]) && ins[2] >= level
