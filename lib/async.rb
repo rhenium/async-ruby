@@ -3,12 +3,12 @@ require "async/task"
 require "async/ext"
 require "pp"
 
-module Kernel
-  # await in await-block
-  def await(task)
-    task.wait
-  end
-end
+#module Kernel
+#  def async(&block)
+#    raise ArgumentError, "block must be given" unless block_given?
+#    asyncify(block)
+#  end
+#end
 
 module Async
   def self.transform(array)
@@ -17,18 +17,18 @@ module Async
         (ins[0] == :opt_send_without_block || ins[0] == :send) &&
         ins[1][:mid] == :await
     }
-    unless await_index
-      return pp array
-    end
+    return false unless await_index
 
     uniuni(array, await_index)
     pp array
+
+    return true
   end
 
   def self.uniuni(ary, ai)
     unopt(ary)
 
-    inner_tmp = ary[13].slice!(ai...(ary[13].rindex([:trace, 16]) || ary[13].rindex([:leave])))
+    inner_tmp = ary[13].slice!(ai...(ary[13].rindex([:trace, 16]) || ary[13].rindex([:trace, 512]) || ary[13].rindex([:leave])))
     inner_tmp.shift(1) # send
 
     # catch table
@@ -63,6 +63,7 @@ module Async
         ]
       ]
     mupp(inner, 0)
+    transform(inner)
     inner[13].insert(2, [:getlocal_OP__WC__0, 2]) # block param
 
     #    ... self task -> swap

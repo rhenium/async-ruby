@@ -26,15 +26,18 @@ class Example
   async def complex_async
     log 1
     job1 = simple_job("JOB1", 2)
+    sleep 0.01
 
     log 2
     job2 = simple_job("JOB2", 5)
+    sleep 0.01
     log 3
 
     ret1 = await job1
     log 4
 
     job3 = simple_job("JOB3", 2)
+    sleep 0.01
     log 5
 
     ret2 = await job2

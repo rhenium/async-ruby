@@ -10,7 +10,12 @@ module Async
     end
 
     def wait
-      @thread.value
+      val = @thread.value
+      if val.is_a?(Task)
+        val.wait
+      else
+        val
+      end
     end
 
     def continue_with
