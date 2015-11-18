@@ -15,23 +15,6 @@ struct METHOD {
 VALUE mAsync;
 VALUE cAsyncTask;
 
-static void
-asyncify(VALUE umethod, rb_iseq_t *nseq)
-{
-    struct METHOD *data;
-    const rb_method_definition_t *def;
-
-    data = (struct METHOD *)DATA_PTR(umethod); // UnboundMethod's DATA_PTR is (struct METHOD *)
-    def = data->me->def;
-
-    if (def->type != VM_METHOD_TYPE_ISEQ) {
-        rb_raise(rb_eTypeError, "unsupported method type (only iseq supported)");
-    }
-
-    // 元の iseqptr が消えなかったり nseq が消えたりするような気もするけど知らない
-    *((rb_iseq_t **)&def->body.iseq.iseqptr) = nseq;
-}
-
 static rb_iseq_t *
 transform(VALUE callable)
 {
@@ -52,8 +35,9 @@ mod_async(VALUE klass, VALUE method_name)
 {
     ID mid;
     VALUE umethod;
-    rb_iseq_t *iseq;
-    
+    rb_iseq_t *nseq;
+    struct METHOD *data;
+
     rb_frozen_class_p(klass);
 
     mid = rb_check_id(&method_name);
@@ -62,9 +46,14 @@ mod_async(VALUE klass, VALUE method_name)
     }
 
     umethod = rb_funcall(klass, rb_intern("instance_method"), 1, method_name);
+    data = (struct METHOD *)DATA_PTR(umethod); // UnboundMethod's DATA_PTR is (struct METHOD *)
+    if (data->me->def->type != VM_METHOD_TYPE_ISEQ) {
+        rb_raise(rb_eTypeError, "unsupported method type (only iseq supported)");
+    }
 
-    iseq = transform(umethod);
-    asyncify(umethod, iseq);
+    // 元の iseqptr が消えなかったり nseq が消えたりするような気もするけど知らない
+    nseq = transform(umethod);
+    *((rb_iseq_t **)&data->me->def->body.iseq.iseqptr) = nseq;
 
     return method_name;
 }
@@ -91,10 +80,10 @@ kern_async(int argc, VALUE *argv, VALUE self)
         rb_raise(rb_eArgError, "Proc or block is required");
     }
 
-    niseq = transform(obj);
-
     proc = (rb_proc_t *)DATA_PTR(obj);
+
     // うーーー
+    niseq = transform(obj);
     proc->block.iseq = niseq;
 
     return obj;
