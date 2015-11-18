@@ -1,9 +1,8 @@
 #include "ruby.h"
 #include "ruby/vm_core.h"
 #include "ruby/iseq.h"
-#include <stdio.h>
 
-// begin: proc.c (v2_3_0_preview1)
+// begin: proc.c (v2.3.0-preview1)
 struct METHOD {
     const VALUE recv;
     const VALUE klass;
@@ -12,8 +11,8 @@ struct METHOD {
 };
 // end: proc.c
 
-VALUE mAsync;
-VALUE cAsyncTask;
+static VALUE mAsync;
+static VALUE cAsyncTask;
 
 static rb_iseq_t *
 transform(VALUE callable)
@@ -33,17 +32,11 @@ transform(VALUE callable)
 static VALUE
 mod_async(VALUE klass, VALUE method_name)
 {
-    ID mid;
     VALUE umethod;
-    rb_iseq_t *nseq;
     struct METHOD *data;
+    rb_iseq_t *niseq;
 
     rb_frozen_class_p(klass);
-
-    mid = rb_check_id(&method_name);
-    if (!mid) {
-        rb_raise(rb_eTypeError, "invalid method");
-    }
 
     umethod = rb_funcall(klass, rb_intern("instance_method"), 1, method_name);
     data = (struct METHOD *)DATA_PTR(umethod); // UnboundMethod's DATA_PTR is (struct METHOD *)
@@ -52,8 +45,8 @@ mod_async(VALUE klass, VALUE method_name)
     }
 
     // 元の iseqptr が消えなかったり nseq が消えたりするような気もするけど知らない
-    nseq = transform(umethod);
-    *((rb_iseq_t **)&data->me->def->body.iseq.iseqptr) = nseq;
+    niseq = transform(umethod);
+    *((rb_iseq_t **)&data->me->def->body.iseq.iseqptr) = niseq;
 
     return method_name;
 }
