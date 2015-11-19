@@ -12,9 +12,10 @@ module Async
         ins[1][:mid] == :await
     }
 
-    transform_(array, await_index) if await_index
-
-    await_index
+    pp array
+    if await_index
+      transform_(array, await_index)
+    end
   end
 
   def self.transform_(ary, ai)
@@ -54,7 +55,8 @@ module Async
     ]
 
     fixlocal(inner, 0)
-    inner[13].insert(2, [:getlocal_OP__WC__0, 2]) # block param
+    inner[13].insert(2, [:getlocal_OP__WC__0, 2],
+                        [:opt_send_without_block, { mid: :result, flag: 0, orig_argc: 0 }, false])
 
     transform(inner) # next await in same level
 

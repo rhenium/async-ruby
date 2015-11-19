@@ -14,8 +14,8 @@ class Example
     complex = complex_async
     log 2
 
-    fin = complex.continue_with { |result|
-      log 3, "result=#{result}"
+    fin = complex.continue_with { |task|
+      log 3, "result=#{task.result}"
     }
 
     log 4
