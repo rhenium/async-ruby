@@ -35,6 +35,17 @@ module Async
       }
     end
 
+    def __await__
+      if @completed
+        yield result
+        self
+      else
+        Task.new {
+          yield result
+        }
+      end
+    end
+
     def completed?
       @completed
     end

@@ -92,8 +92,7 @@ module Async
 
     fixlocal(inner, 0)
     inner[13].insert(2,
-                     [:getlocal_OP__WC__0, 2],
-                     [:opt_send_without_block, { mid: :result, flag: 0, orig_argc: 0 }, false])
+                     [:getlocal_OP__WC__0, 2])
 
     inner = transform(inner, false) # next await in same level
 
@@ -103,7 +102,7 @@ module Async
     [
       [:swap],
       [:pop],
-      [:send, { mid: :continue_with, flag: 4, orig_argc: 0 }, false, inner],
+      [:send, { mid: :__await__, flag: 4, orig_argc: 0 }, false, inner],
     ]
   end
 
