@@ -25,3 +25,4 @@ class A
 end
 
 A.new.a(true).result
+A.new.a(false).result

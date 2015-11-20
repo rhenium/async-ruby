@@ -4,8 +4,21 @@ require "async/ext"
 require "pp"
 
 module Async
-  def self.transform(ary)
+  def self.transform(ary, return_task = true)
     ary[13] = transform1(ary, ary[13])
+
+    if return_task
+      ary[4][:stack_max] = 2 if ary[4][:stack_max] == 1
+      last_i = ary[13].rindex { |i| i.is_a?(Array) && i != [:trace, 16] && i != [:trace, 512] && i != [:leave] }
+      ary[13].insert(last_i + 1,
+                     [:putnil],
+                     [:getconstant, :Async],
+                     [:getconstant, :Task],
+                     [:swap],
+                     [:opt_send_without_block, { mid: :new, flag: 0, orig_argc: 1, blockptr: nil }, false])
+    end
+
+    pp ary
   end
 
   def self.transform1(ary, part, line = 0)
@@ -40,7 +53,6 @@ module Async
             inner = transform1(ary, part[i + 1...end_i] + part.drop(end_i + 1), line) # TODO: leave?
             return part.take(i + 1) + inner + part.drop(end_i)
           end
-          break
         end
       end
     }
@@ -83,7 +95,7 @@ module Async
                      [:getlocal_OP__WC__0, 2],
                      [:opt_send_without_block, { mid: :result, flag: 0, orig_argc: 0 }, false])
 
-    transform(inner) # next await in same level
+    inner = transform(inner, false) # next await in same level
 
     #    ... self task -> swap
     # -> ... task self -> pop

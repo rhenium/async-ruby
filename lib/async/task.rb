@@ -1,16 +1,20 @@
 module Async
   class Task
     def initialize(*args, &blk)
-      @completed = false
-      @exception = nil
-      @value = nil
-      @thread = Thread.new(*args) { |*args|
-        begin
-          yield *args
-        ensure
-          @completed = true
-        end
-      }
+      if blk
+        @completed = false
+        @value = self
+        @thread = Thread.new(*args) { |*args|
+          begin
+            yield *args
+          ensure
+            @completed = true
+          end
+        }
+      else
+        @completed = true
+        @value = args.first
+      end
     end
 
     def wait
@@ -19,7 +23,7 @@ module Async
     end
 
     def result
-      return @value if @value
+      return @value if @value != self
       val = @thread.value
       val = val.result if val.is_a?(Task)
       @value = val
