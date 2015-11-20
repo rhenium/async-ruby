@@ -17,14 +17,14 @@ static VALUE cAsyncTask;
 static rb_iseq_t *
 transform(VALUE callable)
 {
-    VALUE iseqw_ary;
+    VALUE old_iseqw_ary, new_iseqw_ary;
     VALUE old_iseqw, new_iseqw;
 
     old_iseqw = rb_funcall(rb_cISeq, rb_intern("of"), 1, callable);
-    iseqw_ary = rb_funcall(old_iseqw, rb_intern("to_a"), 0);
+    old_iseqw_ary = rb_funcall(old_iseqw, rb_intern("to_a"), 0);
 
-    rb_funcall(mAsync, rb_intern("transform"), 1, iseqw_ary);
-    new_iseqw = rb_iseq_load(iseqw_ary, 0, Qnil);
+    new_iseqw_ary = rb_funcall(mAsync, rb_intern("transform"), 1, old_iseqw_ary);
+    new_iseqw = rb_iseq_load(new_iseqw_ary, 0, Qnil);
 
     return DATA_PTR(new_iseqw);
 }

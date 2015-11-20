@@ -16,7 +16,8 @@ Gem::Specification.new do |spec|
   spec.files         = `git ls-files -z`.split("\x00")
   spec.require_paths = ["lib"]
 
+  spec.add_development_dependency "rake"
   spec.add_development_dependency "rake-compiler"
   spec.add_development_dependency "guard"
-  spec.add_development_dependency "rake"
+  spec.add_development_dependency "guard-rake"
 end
