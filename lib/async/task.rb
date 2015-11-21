@@ -49,5 +49,11 @@ module Async
     def completed?
       @completed
     end
+
+    class << self
+      def wrap(val)
+        val.is_a?(Task) ? val : Async::Task.new(val)
+      end
+    end
   end
 end
