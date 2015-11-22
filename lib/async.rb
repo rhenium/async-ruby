@@ -53,10 +53,6 @@ module Async
   def self.wrap_await(ary, await_i)
     line = ary[13].take(await_i).reverse.find { |i| i.is_a?(Fixnum) }
 
-    ary[4][:local_size] += 1
-    #ary[10] << :__await__proc
-    val_id = ary[10].size + 2
-
     inner = [
       *ary.take(4),
       { arg_size: 1, local_size: 2, stack_max: ary[4][:stack_max] },
@@ -82,12 +78,14 @@ module Async
 
     inner = fixlocal(inner, 0)
     inner[13].insert(4 + await_i,
-                     [:getlocal_OP__WC__0, 2])
+                     [:getlocal_OP__WC__0, 2],
+                     [:opt_send_without_block, { mid: :result, flag: 0, orig_argc: 0 }, false])
     inner[13].insert(3 + await_i,
         [:swap],
         [:pop],
-        [:getlocal_OP__WC__1, val_id],
-        [:send, { mid: :__await__, flag: 6, orig_argc: 0 }, false, nil],
+        [:getlocal_OP__WC__0, 2],
+        [:swap],
+        [:opt_send_without_block, { mid: :__next, flag: 0, orig_argc: 1 }, false],
         [:trace, 512],
         [:leave])
 
@@ -100,11 +98,7 @@ module Async
     [
       [:swap],
       [:pop],
-      [:putself],
-      [:send, { mid: :lambda, flag: 4, orig_argc: 0 }, false, inner],
-      [:setlocal_OP__WC__0, val_id],
-      [:getlocal_OP__WC__0, val_id],
-      [:send, { mid: :__await__, flag: 6, orig_argc: 0 }, false, nil],
+      [:send, { mid: :__await__, flag: 4, orig_argc: 0 }, false, inner],
       [:trace, ary[9] == :block ? 512 : 16],
       [:leave],
     ]

@@ -4,6 +4,7 @@ module Async
       if blk
         @completed = false
         @value = self
+        @__next = nil
         @thread = Thread.new(*args) { |*args|
           begin
             yield *args
@@ -35,15 +36,35 @@ module Async
       }
     end
 
-    def __await__
+    def __await__(&blk)
       if @completed
-        yield result
+        ret = yield self
+        return ret unless @__next
+        while @__next
+          if @__next.completed?
+            res = @__next
+            @__next = nil
+            yield res
+          else
+            return @__next.__await__(&blk)
+          end
+        end
         self
       else
         Task.new {
-          yield result
+          ret = yield self
+          next ret unless @__next
+          while @__next
+            res = @__next
+            @__next = nil
+            yield res
+          end
         }
       end
+    end
+
+    def __next(task)
+      @__next = task
     end
 
     def completed?
