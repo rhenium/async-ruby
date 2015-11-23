@@ -79,13 +79,13 @@ module Async
     inner = fixlocal(inner, 0)
     inner[13].insert(4 + await_i,
                      [:getlocal_OP__WC__0, 2],
-                     [:opt_send_without_block, { mid: :result, flag: 0, orig_argc: 0 }, false])
+                     [:opt_send_without_block, { mid: :result, flag: 16, orig_argc: 0 }, false])
     inner[13].insert(3 + await_i,
         [:swap],
         [:pop],
         [:getlocal_OP__WC__0, 2],
         [:swap],
-        [:opt_send_without_block, { mid: :__next, flag: 0, orig_argc: 1 }, false],
+        [:opt_send_without_block, { mid: :__next__, flag: 0, orig_argc: 1 }, false],
         [:trace, 512],
         [:leave])
 

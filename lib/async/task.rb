@@ -1,3 +1,5 @@
+require "forwardable"
+
 module Async
   class Task
     def initialize(*args, &blk)
@@ -39,32 +41,29 @@ module Async
     def __await__(&blk)
       if @completed
         ret = yield self
-        return ret unless @__next
         while @__next
           if @__next.completed?
-            res = @__next
-            @__next = nil
-            yield res
+            res, @__next = @__next, nil
+            ret = yield res
           else
             return @__next.__await__(&blk)
           end
         end
-        self
+        ret
       else
         Task.new {
           ret = yield self
-          next ret unless @__next
           while @__next
-            res = @__next
-            @__next = nil
-            yield res
+            res, @__next = @__next, nil
+            ret = yield res
           end
+          ret
         }
       end
     end
 
-    def __next(task)
-      @__next = task
+    def __next__(task)
+      @__next = SubTask.new(task, self)
     end
 
     def completed?
@@ -75,6 +74,21 @@ module Async
       def wrap(val)
         val.is_a?(Task) ? val : Async::Task.new(val)
       end
+    end
+  end
+
+  class SubTask
+    extend Forwardable
+
+    def_delegators :@task, *(Task.instance_methods - Object.instance_methods - [:__next__])
+
+    def initialize(task, parent)
+      @task = task
+      @parent = parent
+    end
+
+    def __next__(task)
+      @parent.__next__(task)
     end
   end
 end

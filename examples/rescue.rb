@@ -12,17 +12,25 @@ class A
 
   async def a(arg)
     log 1
-    if arg
+    begin
       log 2
-      p await job(arg)
+      await job
+    rescue => e
+      log 3, e
+    else
+      a
+    ensure
+      log 4
     end
-    log 3
+    log 5
   end
 
-  def job(arg)
-    Async::Task.new { sleep 1; arg }
+  def job
+    Async::Task.new {
+      sleep 1
+      raise "errror!!!!"
+    }
   end
 end
 
-A.new.a(true).result
-A.new.a(false).result
+A.new.a(1).result
