@@ -18,7 +18,7 @@ class A
     rescue => e
       log 3, e
     else
-      a
+      raise "bug?"
     ensure
       log 4
     end

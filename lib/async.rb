@@ -1,6 +1,7 @@
 require "async/version"
 require "async/task"
 require "async/ext"
+require "async/utils"
 require "pp"
 
 module Async
@@ -20,6 +21,14 @@ module Async
     pp new_ary
   end
 
+  # TODO: jump がある場合スタックの深さが正しいとは限らないよね。今の Ruby だと大丈夫だけど
+  def self.calc_stack_depth(ary, index)
+    ary[13].take(index).inject(0) { |sum, ins|
+      next sum unless ins.is_a?(Array)
+      sum + stack_increase_size(ins)
+    }
+  end
+
   def self.duplicate_ary(ary)
     ary.map { |item|
       if item.is_a?(Array)
@@ -36,7 +45,7 @@ module Async
     ary[12].each { |cc|
       cc[1] = transform(cc[1]) if cc[1]
     }
-    
+
     await_i = ary[13].index { |ins|
       ins.is_a?(Array) &&
         (ins[0] == :send || ins[0] == :opt_send_without_block) &&
@@ -53,6 +62,12 @@ module Async
   def self.wrap_await(ary, await_i)
     line = ary[13].take(await_i).reverse.find { |i| i.is_a?(Fixnum) }
 
+    stack_depth = calc_stack_depth(ary, await_i) - 2
+    ary[10] << :__await__stack << :__await__task
+    add_local_variables(ary, 2)
+    stack_val = 3
+    task_val = 2
+
     inner = [
       *ary.take(4),
       { arg_size: 1, local_size: 2, stack_max: ary[4][:stack_max] },
@@ -61,91 +76,114 @@ module Async
       ary[7], # file path
       line, # line number
       :block,
-      [:await_result], # これってなんかいみあるん？
-      { lead_num: 1 },
+      [:await_result],
+      { lead_num: 1, ambiguous_param0: true },
       ary[12],
       [
         line,
         [:trace, 256], # RUBY_EVENT_B_CALL
         [:jump, :"label_after_await_#{await_i}"],
-        *ary[13].take(await_i),
+        *duplicate_ary(ary[13].take(await_i)),
         :"label_after_await_#{await_i}",
-        *ary[13].drop(await_i + 1),
+        *duplicate_ary(ary[13].drop(await_i + 1)),
         [:trace, 512], # RUBY_EVENT_B_RETURN
         [:leave],
       ]
     ]
 
-    inner = fixlocal(inner, 0)
+    fixlocal(inner, 0)
     inner[13].insert(4 + await_i,
+                     [:getlocal_OP__WC__1, stack_val],
+                     [:expandarray, stack_depth, 0], # expand stack
                      [:getlocal_OP__WC__0, 2],
                      [:opt_send_without_block, { mid: :result, flag: 16, orig_argc: 0 }, false])
     inner[13].insert(3 + await_i,
-        [:swap],
-        [:pop],
-        [:getlocal_OP__WC__0, 2],
-        [:swap],
-        [:opt_send_without_block, { mid: :__next__, flag: 0, orig_argc: 1 }, false],
-        [:trace, 512],
-        [:leave])
+                     [:swap],
+                     [:pop],
+                     [:reverse, stack_depth + 1],
+                     [:newarray, stack_depth],
+                     [:setlocal_OP__WC__1, stack_val],
+                     [:getlocal_OP__WC__1, task_val],
+                     [:swap],
+                     [:opt_send_without_block, { mid: :__next__, flag: 16, orig_argc: 1 }, false],
+                     [:trace, 512],
+                     [:leave])
 
     transform1(inner) # next await in same level
 
-    #    ... self task -> swap
-    # -> ... task self -> pop
-    # -> ... task -> send
-    ary[13][await_i, 1] = 
-    [
-      [:swap],
-      [:pop],
-      [:send, { mid: :__await__, flag: 4, orig_argc: 0 }, false, inner],
-      [:trace, ary[9] == :block ? 512 : 16],
-      [:leave],
+    # depth: 3
+    #    a b self task -> setlocal(task_val, 0)
+    # -> a b self -> pop
+    # -> a b -> reverse(depth)
+    # -> b a -> newarray(depth)
+    # -> task [ta.b.a] -> send(argc=1)
+    # -> new_task
+    ary[13][await_i, 1] = [
+        [:setlocal_OP__WC__0, task_val],
+        [:pop],
+        [:reverse, stack_depth],
+        [:newarray, stack_depth],
+        [:setlocal_OP__WC__0, stack_val],
+        [:getlocal_OP__WC__0, task_val],
+        [:send, { mid: :__await__, flag: 4, orig_argc: 0 }, false, inner],
+        [:trace, ary[9] == :block ? 512 : 16],
+        [:leave],
     ]
   end
 
-  def self.fixlocal(ary, level)
-    ary = duplicate_ary(ary)
-    # body
-    fixlocal_(ary, level)
-    # catch
-    ary[12].each { |cc| # catch iseq
-      next unless cc[1]
-      cc[1] = fixlocal(cc[1], level + 1)
-    }
-    # sub iseq in body
+  # yields: iseq, level
+  def self.each_iseq(ary, level = 0, &blk)
+    yield ary, level
+
+    ary[12].each { |cc|
+      each_iseq(cc[1], level + 1, &blk) if cc[1] }
     ary[13].each { |ins|
       next unless ins.is_a?(Array)
       case ins[0]
       when :send, :invokesuper
-        ins[3] = fixlocal(ins[3], level + 1) if ins[3]
+        each_iseq(ins[3], level + 1, &blk) if ins[3]
       when :putiseq
-        ins[1] = fixlocal(ins[1], level + 1) if ins[1]
+        each_iseq(ins[1], level + 1, &blk) if ins[1]
       else # :once, :defineclass わからん
-      end
-    }
-
-    ary
+      end }
   end
 
-  def self.fixlocal_(ary, level)
-    ary[13].map! { |ins|
-      next ins unless ins.is_a?(Array)
-      case ins[0]
-      when :setlocal_OP__WC__0
-        ins = [:setlocal_OP__WC__1, ins[1]] if level <= 0
-      when :setlocal_OP__WC__1
-        ins = [:setlocal, ins[1], 2] if level <= 1
-      when :setlocal
-        ins = [:setlocal, ins[1], ins[2] + 1] if level <= ins[2]
-      when :getlocal_OP__WC__0
-        ins = [:getlocal_OP__WC__1, ins[1]] if level <= 0
-      when :getlocal_OP__WC__1
-        ins = [:getlocal, ins[1], 2] if level <= 1
-      when :getlocal
-        ins = [:getlocal, ins[1], ins[2] + 1] if level <= ins[2]
-      end
-      ins
+  def self.add_local_variables(boss, count)
+    each_iseq(boss) { |ary, level|
+      ary[13].each { |ins|
+        next unless ins.is_a?(Array)
+        case ins[0]
+        when :setlocal_OP__WC__0, :getlocal_OP__WC__0
+          ins[1] += count if level == 0
+        when :setlocal_OP__WC__1, :getlocal_OP__WC__1
+          ins[1] += count if level == 1
+        when :setlocal, :getlocal
+          ins[1] += count if level == ins[2]
+        end
+      }
+    }
+  end
+
+  def self.fixlocal(boss, blevel)
+    each_iseq(boss, blevel) { |ary, level|
+      ary[13].map! { |ins|
+        next ins unless ins.is_a?(Array)
+        case ins[0]
+        when :setlocal_OP__WC__0
+          ins = [:setlocal_OP__WC__1, ins[1]] if level <= 0
+        when :setlocal_OP__WC__1
+          ins = [:setlocal, ins[1], 2] if level <= 1
+        when :setlocal
+          ins = [:setlocal, ins[1], ins[2] + 1] if level <= ins[2]
+        when :getlocal_OP__WC__0
+          ins = [:getlocal_OP__WC__1, ins[1]] if level <= 0
+        when :getlocal_OP__WC__1
+          ins = [:getlocal, ins[1], 2] if level <= 1
+        when :getlocal
+          ins = [:getlocal, ins[1], ins[2] + 1] if level <= ins[2]
+        end
+        ins
+      }
     }
   end
 end

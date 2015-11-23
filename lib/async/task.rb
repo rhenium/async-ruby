@@ -4,19 +4,24 @@ module Async
   class Task
     def initialize(*args, &blk)
       if blk
-        @completed = false
-        @value = self
         @__next = nil
-        @thread = Thread.new(*args) { |*args|
+        @completed = false
+        @end = false
+        @value = nil
+        @thread_waiting = []
+        @thread = Thread.new(args) { |args|
           begin
             yield *args
           ensure
-            @completed = true
+            @end = true
+            while th = @thread_waiting.shift
+              th.wakeup
+            end
           end
         }
       else
-        @completed = true
         @value = args.first
+        @completed = true
       end
     end
 
@@ -25,16 +30,24 @@ module Async
       self
     end
 
+    def __wait__
+      return if @end
+      @thread_waiting << Thread.current
+      Thread.stop
+      self
+    end
+
     def result
-      return @value if @value != self
+      return @value if completed?
       val = @thread.value
       val = val.result if val.is_a?(Task)
+      @completed = true
       @value = val
     end
 
     def continue_with
       Task.new {
-        yield wait
+        yield __wait__
       }
     end
 
@@ -52,10 +65,10 @@ module Async
         ret
       else
         Task.new {
-          ret = yield self
+          ret = yield __wait__
           while @__next
             res, @__next = @__next, nil
-            ret = yield res
+            ret = yield res.__wait__
           end
           ret
         }
@@ -63,7 +76,7 @@ module Async
     end
 
     def __next__(task)
-      @__next = SubTask.new(task, self)
+      @__next = task
     end
 
     def completed?
@@ -74,21 +87,6 @@ module Async
       def wrap(val)
         val.is_a?(Task) ? val : Async::Task.new(val)
       end
-    end
-  end
-
-  class SubTask
-    extend Forwardable
-
-    def_delegators :@task, *(Task.instance_methods - Object.instance_methods - [:__next__])
-
-    def initialize(task, parent)
-      @task = task
-      @parent = parent
-    end
-
-    def __next__(task)
-      @parent.__next__(task)
     end
   end
 end

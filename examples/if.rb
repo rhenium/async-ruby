@@ -14,7 +14,7 @@ class A
     log 1
     if arg
       log 2
-      p await job(arg)
+      p p await job(arg)
     end
     log 3
   end
@@ -24,5 +24,6 @@ class A
   end
 end
 
-A.new.a(true).result
+p n = A.new.a(23)
+p n.result
 A.new.a(false).result
