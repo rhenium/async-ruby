@@ -18,13 +18,16 @@ class A
     [m, s]
   end
 
-  async def a
-    (1..10).map( &async { |n|
+  async def a(arg)
+    await Async::Task.new { sleep 1 }
+    (1..arg).map( &async { |n|
       log n, :before
+      log n, arg.to_s
       await Async::Task.new { sleep n.to_f/10 }
       log n, :after
     }).map(&:wait)
   end
 end
 
-p A.new.a
+A.new.a(2)
+A.new.a(3)

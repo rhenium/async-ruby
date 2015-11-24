@@ -19,12 +19,14 @@ transform(VALUE callable)
 {
     VALUE old_iseqw_ary, new_iseqw_ary;
     VALUE old_iseqw, new_iseqw;
+    const rb_iseq_t *parent;
 
     old_iseqw = rb_funcall(rb_cISeq, rb_intern("of"), 1, callable);
+    parent = ((rb_iseq_t *)DATA_PTR(old_iseqw))->body->parent_iseq;
     old_iseqw_ary = rb_funcall(old_iseqw, rb_intern("to_a"), 0);
 
     new_iseqw_ary = rb_funcall(mAsync, rb_intern("transform"), 1, old_iseqw_ary);
-    new_iseqw = rb_iseq_load(new_iseqw_ary, 0, Qnil);
+    new_iseqw = rb_iseq_load(new_iseqw_ary, (VALUE)parent, Qnil);
 
     return DATA_PTR(new_iseqw);
 }
@@ -48,6 +50,7 @@ mod_async(VALUE klass, VALUE method_name)
     niseq = transform(umethod);
     *((rb_iseq_t **)&data->me->def->body.iseq.iseqptr) = niseq;
 
+    rb_funcall(klass, rb_intern("define_method"), 2, method_name, umethod);
     return method_name;
 }
 
