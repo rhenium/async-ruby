@@ -31,7 +31,7 @@ module Async
     end
 
     def __wait__
-      return if @end
+      return self if @end
       @thread_waiting << Thread.current
       Thread.stop
       self
