@@ -5,17 +5,10 @@ require "async/utils"
 
 module Async
   def self.transform(ary)
-    new_ary = transform1(duplicate_ary(ary))
-
+    new_ary = duplicate_ary(ary)
     new_ary[4][:stack_max] = 2 if new_ary[4][:stack_max] == 1
-    last_i = new_ary[13].rindex { |i| i.is_a?(Array) && i != [:trace, 16] && i != [:trace, 512] && i != [:leave] }
-    new_ary[13].insert(last_i + 1,
-                       [:putnil],
-                       [:getconstant, :Async],
-                       [:getconstant, :Task],
-                       [:swap],
-                       [:opt_send_without_block, { mid: :wrap, flag: 0, orig_argc: 1, blockptr: nil }, false])
-    new_ary
+    wrap_with_task(new_ary)
+    new_ary = transform1(new_ary)
   end
 
   # TODO: jump でスタックが壊れている場合は？
@@ -86,7 +79,27 @@ module Async
       ]
     ]
 
-    fixlocal(inner, 0)
+    each_iseq(inner) { |ary, level|
+      ary[13].map! { |ins|
+        next ins unless ins.is_a?(Array)
+        case ins[0]
+        when :setlocal_OP__WC__0
+          ins = [:setlocal_OP__WC__1, ins[1]] if level <= 0
+        when :setlocal_OP__WC__1
+          ins = [:setlocal, ins[1], 2] if level <= 1
+        when :setlocal
+          ins = [:setlocal, ins[1], ins[2] + 1] if level <= ins[2]
+        when :getlocal_OP__WC__0
+          ins = [:getlocal_OP__WC__1, ins[1]] if level <= 0
+        when :getlocal_OP__WC__1
+          ins = [:getlocal, ins[1], 2] if level <= 1
+        when :getlocal
+          ins = [:getlocal, ins[1], ins[2] + 1] if level <= ins[2]
+        end
+        ins
+      }
+    }
+
     inner[13].insert(3 + await_i,
                      [:getlocal_OP__WC__1, stack_val],
                      [:expandarray, stack_depth, 0], # expand stack
@@ -113,15 +126,31 @@ module Async
     # -> task [ta.b.a] -> send(argc=1)
     # -> new_task
     ary[13][await_i, 1] = [
-        [:setlocal_OP__WC__0, task_val],
-        [:pop],
-        [:reverse, stack_depth],
-        [:newarray, stack_depth],
-        [:setlocal_OP__WC__0, stack_val],
-        [:getlocal_OP__WC__0, task_val],
-        [:send, { mid: :__await__, flag: 4 + 128, orig_argc: 0 }, false, inner],
-        [:leave],
+      [:setlocal_OP__WC__0, task_val],
+      [:pop],
+      [:reverse, stack_depth],
+      [:newarray, stack_depth],
+      [:setlocal_OP__WC__0, stack_val],
+      [:getlocal_OP__WC__0, task_val],
+      [:send, { mid: :__await__, flag: 4 + 128, orig_argc: 0 }, false, inner],
+      [:leave],
     ]
+  end
+
+  def self.wrap_with_task(ary)
+    wrapper = [
+      [:putnil],
+      [:getconstant, :Async],
+      [:getconstant, :Task],
+      [:swap],
+      [:opt_send_without_block, { mid: :wrap, flag: 128, orig_argc: 1, blockptr: nil }, false]
+    ]
+    body = ary[13]
+    i = body.size - 1
+    while i >= 0
+      body.insert(i, *wrapper) if body[i] == [:leave]
+      i -= 1
+    end
   end
 
   # yields: iseq, level
@@ -153,29 +182,6 @@ module Async
         when :setlocal, :getlocal
           ins[1] += count if level == ins[2]
         end
-      }
-    }
-  end
-
-  def self.fixlocal(boss, blevel)
-    each_iseq(boss, blevel) { |ary, level|
-      ary[13].map! { |ins|
-        next ins unless ins.is_a?(Array)
-        case ins[0]
-        when :setlocal_OP__WC__0
-          ins = [:setlocal_OP__WC__1, ins[1]] if level <= 0
-        when :setlocal_OP__WC__1
-          ins = [:setlocal, ins[1], 2] if level <= 1
-        when :setlocal
-          ins = [:setlocal, ins[1], ins[2] + 1] if level <= ins[2]
-        when :getlocal_OP__WC__0
-          ins = [:getlocal_OP__WC__1, ins[1]] if level <= 0
-        when :getlocal_OP__WC__1
-          ins = [:getlocal, ins[1], 2] if level <= 1
-        when :getlocal
-          ins = [:getlocal, ins[1], ins[2] + 1] if level <= ins[2]
-        end
-        ins
       }
     }
   end
