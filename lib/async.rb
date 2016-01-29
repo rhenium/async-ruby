@@ -21,7 +21,7 @@ module Async
     pp new_ary
   end
 
-  # TODO: jump がある場合スタックの深さが正しいとは限らないよね。今の Ruby だと大丈夫だけど
+  # TODO: jump でスタックが壊れている場合は？
   def self.calc_stack_depth(ary, index)
     ary[13].take(index).inject(0) { |sum, ins|
       next sum unless ins.is_a?(Array)
@@ -63,7 +63,7 @@ module Async
     line = ary[13].take(await_i).reverse.find { |i| i.is_a?(Fixnum) }
 
     stack_depth = calc_stack_depth(ary, await_i) - 2
-    ary[10] << :__await__stack << :__await__task
+    ary[10] << :$__await__stack << :$__await__task
     add_local_variables(ary, 2)
     stack_val = 3
     task_val = 2
@@ -76,28 +76,26 @@ module Async
       ary[7], # file path
       line, # line number
       :block,
-      [:await_result],
+      [:$__await_result_task__],
       { lead_num: 1, ambiguous_param0: true },
       ary[12],
       [
         line,
-        [:trace, 256], # RUBY_EVENT_B_CALL
         [:jump, :"label_after_await_#{await_i}"],
         *duplicate_ary(ary[13].take(await_i)),
         :"label_after_await_#{await_i}",
         *duplicate_ary(ary[13].drop(await_i + 1)),
-        [:trace, 512], # RUBY_EVENT_B_RETURN
         [:leave],
       ]
     ]
 
     fixlocal(inner, 0)
-    inner[13].insert(4 + await_i,
+    inner[13].insert(3 + await_i,
                      [:getlocal_OP__WC__1, stack_val],
                      [:expandarray, stack_depth, 0], # expand stack
                      [:getlocal_OP__WC__0, 2],
                      [:opt_send_without_block, { mid: :result, flag: 16, orig_argc: 0 }, false])
-    inner[13].insert(3 + await_i,
+    inner[13].insert(2 + await_i,
                      [:swap],
                      [:pop],
                      [:reverse, stack_depth + 1],
@@ -106,7 +104,6 @@ module Async
                      [:getlocal_OP__WC__1, task_val],
                      [:swap],
                      [:opt_send_without_block, { mid: :__next__, flag: 16, orig_argc: 1 }, false],
-                     [:trace, 512],
                      [:leave])
 
     transform1(inner) # next await in same level
@@ -118,7 +115,7 @@ module Async
     # -> b a -> newarray(depth)
     # -> task [ta.b.a] -> send(argc=1)
     # -> new_task
-    ary[13][await_i, 1] = [
+    ary[13][await_i..-1] = [
         [:setlocal_OP__WC__0, task_val],
         [:pop],
         [:reverse, stack_depth],
@@ -126,7 +123,6 @@ module Async
         [:setlocal_OP__WC__0, stack_val],
         [:getlocal_OP__WC__0, task_val],
         [:send, { mid: :__await__, flag: 4, orig_argc: 0 }, false, inner],
-        [:trace, ary[9] == :block ? 512 : 16],
         [:leave],
     ]
   end
