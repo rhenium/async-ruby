@@ -8,7 +8,8 @@ module Async
     new_ary = duplicate_ary(ary)
     new_ary[4][:stack_max] = 2 if new_ary[4][:stack_max] == 1
     wrap_with_task(new_ary)
-    new_ary = transform1(new_ary)
+    transform1(new_ary)
+    new_ary
   end
 
   # TODO: jump でスタックが壊れている場合は？
@@ -50,11 +51,10 @@ module Async
   end
 
   def self.wrap_await(ary, await_i)
-    line = ary[13].take(await_i).reverse.find { |i| i.is_a?(Fixnum) }
+    line = ary[13].take(await_i).reverse_each.find { |i| i.is_a?(Fixnum) }
 
     stack_depth = calc_stack_depth(ary, await_i) - 2
-    ary[10] << :$__await__stack << :$__await__task
-    add_local_variables(ary, 2)
+    add_local_variables(ary, :$__await_stack__, :$__await_task__)
     stack_val = 3
     task_val = 2
 
@@ -66,7 +66,7 @@ module Async
       ary[7], # file path
       line, # line number
       :block,
-      [:$__await_result_task__],
+      [:$__await_result__],
       { lead_num: 1, ambiguous_param0: true },
       ary[12],
       [
@@ -79,8 +79,8 @@ module Async
       ]
     ]
 
-    each_iseq(inner) { |ary, level|
-      ary[13].map! { |ins|
+    each_iseq(inner) { |tary, level|
+      tary[13].map! { |ins|
         next ins unless ins.is_a?(Array)
         case ins[0]
         when :setlocal_OP__WC__0
@@ -103,8 +103,7 @@ module Async
     inner[13].insert(3 + await_i,
                      [:getlocal_OP__WC__1, stack_val],
                      [:expandarray, stack_depth, 0], # expand stack
-                     [:getlocal_OP__WC__0, 2],
-                     [:opt_send_without_block, { mid: :result, flag: 16, orig_argc: 0 }, false])
+                     [:getlocal_OP__WC__0, 2])
     inner[13].insert(2 + await_i,
                      [:swap],
                      [:pop],
@@ -170,7 +169,9 @@ module Async
       end }
   end
 
-  def self.add_local_variables(boss, count)
+  def self.add_local_variables(boss, *vars)
+    count = vars.size
+    boss[10].concat(vars)
     each_iseq(boss) { |ary, level|
       ary[13].each { |ins|
         next unless ins.is_a?(Array)
