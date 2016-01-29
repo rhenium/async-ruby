@@ -2,11 +2,9 @@ require "async/version"
 require "async/task"
 require "async/ext"
 require "async/utils"
-require "pp"
 
 module Async
   def self.transform(ary)
-    pp ary
     new_ary = transform1(duplicate_ary(ary))
 
     new_ary[4][:stack_max] = 2 if new_ary[4][:stack_max] == 1
@@ -17,8 +15,6 @@ module Async
                        [:getconstant, :Task],
                        [:swap],
                        [:opt_send_without_block, { mid: :wrap, flag: 0, orig_argc: 1, blockptr: nil }, false])
-
-    pp new_ary
   end
 
   # TODO: jump でスタックが壊れている場合は？
