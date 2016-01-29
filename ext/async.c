@@ -67,7 +67,14 @@ kern_async(int argc, VALUE *argv, VALUE self)
     rb_scan_args(argc, argv, "01", &obj);
     if (!NIL_P(obj)) {
         if (!rb_obj_is_proc(obj)) {
-            rb_raise(rb_eTypeError, "wrong argument type (expected Proc)");
+            VALUE thread = rb_thread_current();
+            rb_thread_t * th;
+            TypedData_Get_Struct(thread, rb_thread_t, RTYPEDDATA_TYPE(thread), th);
+            if (self == th->vm->top_self) {
+                return mod_async(CLASS_OF(self), obj);
+            } else {
+                rb_raise(rb_eTypeError, "wrong argument type (expected Proc)");
+            }
         }
     } else if (rb_block_given_p()) {
         obj = rb_block_proc();
