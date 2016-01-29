@@ -1,8 +1,10 @@
 module Async
-  def self.stack_increase_size(ins)
-    STACK_INCREASE_MAP[ins[0]] ||
-      STACK_INCREASE_CALC_MAP[ins[0]].call(ins) ||
-      raise(ArgumentError, "unknown instruction: #{ins}")
+  class << self
+    def stack_increase_size(ins)
+      STACK_INCREASE_MAP[ins[0]] ||
+        STACK_INCREASE_CALC_MAP[ins[0]].call(ins) ||
+        raise(ArgumentError, "unknown instruction: #{ins}")
+    end
   end
 
   STACK_INCREASE_CALC_MAP = {
@@ -23,7 +25,7 @@ module Async
     defined: 0,
     getconstant: 0,
     jump: 0,
-    leave: 0,
+    leave: -1, ###
     nop: 0,
     opt_aref_with: 0,
     opt_call_c_function: 0,
