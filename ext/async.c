@@ -50,7 +50,6 @@ mod_async(VALUE klass, VALUE method_name)
     niseq = transform(umethod);
     *((rb_iseq_t **)&data->me->def->body.iseq.iseqptr) = niseq;
 
-    rb_funcall(klass, rb_intern("define_method"), 2, method_name, umethod);
     return method_name;
 }
 
