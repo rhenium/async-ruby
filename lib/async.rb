@@ -15,6 +15,7 @@ module Async
                        [:getconstant, :Task],
                        [:swap],
                        [:opt_send_without_block, { mid: :wrap, flag: 0, orig_argc: 1, blockptr: nil }, false])
+    new_ary
   end
 
   # TODO: jump でスタックが壊れている場合は？
@@ -99,7 +100,7 @@ module Async
                      [:setlocal_OP__WC__1, stack_val],
                      [:getlocal_OP__WC__1, task_val],
                      [:swap],
-                     [:opt_send_without_block, { mid: :__next__, flag: 16, orig_argc: 1 }, false],
+                     [:opt_send_without_block, { mid: :__next__, flag: 16 + 128, orig_argc: 1 }, false],
                      [:leave])
 
     transform1(inner) # next await in same level
@@ -111,14 +112,14 @@ module Async
     # -> b a -> newarray(depth)
     # -> task [ta.b.a] -> send(argc=1)
     # -> new_task
-    ary[13][await_i..-1] = [
+    ary[13][await_i, 1] = [
         [:setlocal_OP__WC__0, task_val],
         [:pop],
         [:reverse, stack_depth],
         [:newarray, stack_depth],
         [:setlocal_OP__WC__0, stack_val],
         [:getlocal_OP__WC__0, task_val],
-        [:send, { mid: :__await__, flag: 4, orig_argc: 0 }, false, inner],
+        [:send, { mid: :__await__, flag: 4 + 128, orig_argc: 0 }, false, inner],
         [:leave],
     ]
   end
