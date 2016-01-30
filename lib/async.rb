@@ -111,20 +111,20 @@ module Async
         next ins unless ins.is_a?(Array)
         case ins[0]
         when :setlocal_OP__WC__0
+          ins[1] += shift if level == 0
           ins[0] = :setlocal_OP__WC__1 if level == 0
-          ins[1] += shift if level == 0
         when :getlocal_OP__WC__0
-          ins[0] = :getlocal_OP__WC__1 if level == 0
           ins[1] += shift if level == 0
+          ins[0] = :getlocal_OP__WC__1 if level == 0
         when :setlocal_OP__WC__1
+          ins[1] += shift if level == 1
           ins.replace([:setlocal, ins[1], 2]) if level <= 1
-          ins[1] += shift if level == 1
         when :getlocal_OP__WC__1
-          ins.replace([:getlocal, ins[1], 2]) if level <= 1
           ins[1] += shift if level == 1
+          ins.replace([:getlocal, ins[1], 2]) if level <= 1
         when :setlocal, :getlocal
-          ins[2] += 1 if level <= ins[2]
           ins[1] += shift if level == ins[2]
+          ins[2] += 1 if level <= ins[2]
         end
         ins
       }
