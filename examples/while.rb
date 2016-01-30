@@ -22,34 +22,6 @@ class A
     :a
   end
 
-  def a1(arg)
-    log 1
-    while arg > 0
-      log 2
-      if arg.odd?
-        kk = proc { |res|
-          __goto :AA
-          while arg > 0
-            log 2
-            if arg.odd?
-              job.__await__ &kk 
-              return
-            end
-            :AA
-            log 3
-            arg -= 1
-          end
-          log 4
-        }
-        job.__await__ &kk
-        return
-      end
-      log 3
-      arg -= 1
-    end
-    log 4
-  end
-
   def job
     Async::Task.new { sleep 1; :c }
   end

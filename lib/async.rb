@@ -5,151 +5,130 @@ require "async/utils"
 
 module Async
   def self.transform(ary)
-    new_ary = duplicate_ary(ary)
-    new_ary[4][:stack_max] = 2 if new_ary[4][:stack_max] == 1
-    wrap_with_task(new_ary)
-    transform1(new_ary)
-    new_ary
+    inner = transform_inner(ary)
+    new_ary = [
+      *ary.take(4),
+      { arg_size: 1, local_size: ary[4][:local_size] + 3, stack_max: 1 }, # TODO: local_size
+      ary[5], # location
+      ary[6], # file name
+      ary[7], # file path
+      ary[8], # line number
+      :method,
+      (ary[10] << :$__await_jump__ << :$__await_stack__ << :$__await_proc__),
+      ary[11],
+      [],
+      [
+        ary[8], # line
+        [:putspecialobject, 1],
+        [:send, { mid: :lambda, flag: 4, orig_argc: 0 }, false, inner],
+        [:dup],
+        [:setlocal_OP__WC__0, 2],
+        [:putnil],
+        [:opt_send_without_block, { mid: :[], flag: 16, orig_argc: 1 }, false],
+        [:leave]
+      ]
+    ]
   end
 
-  # TODO: jump でスタックが壊れている場合は？
-  def self.calc_stack_depth(ary, index)
-    ary[13].take(index).inject(0) { |sum, ins|
-      next sum unless ins.is_a?(Array)
-      sum + stack_increase_size(ins)
-    }
-  end
-
-  def self.duplicate_ary(ary)
-    ary.map { |item|
-      if item.is_a?(Array)
-        duplicate_ary(item)
-      elsif item.is_a?(Hash)
-        duplicate_ary(item).to_h
-      else
-        item
-      end
-    }
-  end
-
-  def self.transform1(ary)
-    ary[12].each { |cc|
-      cc[1] = transform(cc[1]) if cc[1]
-    }
-
-    await_i = ary[13].index { |ins|
-      ins.is_a?(Array) &&
-        (ins[0] == :send || ins[0] == :opt_send_without_block) &&
-        ins[1][:mid] == :await &&
-        ins[1][:orig_argc] == 1 } # TODO
-
-    if await_i
-      wrap_await(ary, await_i)
-    end
-
-    ary
-  end
-
-  def self.wrap_await(ary, await_i)
-    line = ary[13].take(await_i).reverse_each.find { |i| i.is_a?(Fixnum) }
-
-    stack_depth = calc_stack_depth(ary, await_i) - 2
-    add_local_variables(ary, :$__await_stack__, :$__await_task__)
-    stack_val = 3
-    task_val = 2
+  def self.transform_inner(ary)
+    shift_count = 3
 
     inner = [
       *ary.take(4),
-      { arg_size: 1, local_size: 2, stack_max: ary[4][:stack_max] },
+      { arg_size: 0, local_size: 2, stack_max: ary[4][:stack_max] },
       "await in #{ary[5]}",
       ary[6], # file name
       ary[7], # file path
-      line, # line number
+      ary[8], # line number
       :block,
       [:$__await_result__],
-      { lead_num: 1, ambiguous_param0: true },
-      ary[12],
-      [
-        line,
-        [:jump, :"label_after_await_#{await_i}"],
-        *duplicate_ary(ary[13].take(await_i)),
-        :"label_after_await_#{await_i}",
-        *duplicate_ary(ary[13].drop(await_i + 1)),
-        [:leave],
-      ]
+      { lead_num: 1 },
+      ary[12].each { |cc| cc[1] && burylocal(cc[1], shift: shift_count, base_level: 1) },
+      ary[13]
     ]
 
-    each_iseq(inner) { |tary, level|
+    burylocal(inner, shift: shift_count)
+
+    tags = []
+    shift_size = 3
+    body = inner[13]
+    i = body.size - 1
+    begin
+      ins = body[i]
+      next unless ins.is_a?(Array)
+      case ins[0]
+      when :leave
+        body.insert(i,
+          [:putnil],
+          [:getconstant, :Async],
+          [:getconstant, :Task],
+          [:swap],
+          [:opt_send_without_block, { mid: :wrap, flag: 128, orig_argc: 1, blockptr: nil }, false])
+      when :send, :opt_send_without_block
+        next unless ins[1][:mid] == :await && ins[1][:orig_argc] == 1 # TODO
+        tags << tag = :"@__await_jump_#{i}__"
+        stack_depth = calc_stack_depth(body, i) - 2
+        # depth: 2
+        # -> a b task self -> swap
+        # -> a b self task -> pop
+        # -> a b task -> reverse(depth)
+        # -> task b a -> newarray(depth)
+        # -> task [ta.b.a] -> send(argc=1)
+        # -> new_task
+        body[i, 1] = [
+          [:putobject, tag],
+          [:setlocal_OP__WC__1, 4],
+          [:swap],
+          [:pop],
+          [:reverse, stack_depth + 1],
+          [:newarray, stack_depth],
+          [:setlocal_OP__WC__1, 3],
+          [:getlocal_OP__WC__1, 2],
+          [:send, { mid: :__await__, flag: 2 + 128, orig_argc: 0 }, false, nil],
+          [:leave],
+          tag,
+          [:getlocal_OP__WC__1, 3],
+          [:expandarray, stack_depth, 0],
+          [:getlocal_OP__WC__0, 2],
+          [:opt_send_without_block, { mid: :result, flag: 16, orig_argc: 0 }, false]
+        ]
+      end
+    end while (i -= 1) > 0
+
+    body.insert(0,
+      [:getlocal_OP__WC__1, 4],
+      [:opt_case_dispatch, tags.flat_map { |t| [t, t] }, :@__await__else__],
+      :@__await__else__)
+
+    inner
+  end
+
+  def self.burylocal(ary, shift:, base_level: 0)
+    shift_count = 3
+    each_iseq(ary) { |tary, level|
+      next if base_level > level
       tary[13].map! { |ins|
         next ins unless ins.is_a?(Array)
         case ins[0]
         when :setlocal_OP__WC__0
-          ins = [:setlocal_OP__WC__1, ins[1]] if level <= 0
-        when :setlocal_OP__WC__1
-          ins = [:setlocal, ins[1], 2] if level <= 1
-        when :setlocal
-          ins = [:setlocal, ins[1], ins[2] + 1] if level <= ins[2]
+          ins[0] = :setlocal_OP__WC__1 if level == 0
+          ins[1] += shift if level == 0
         when :getlocal_OP__WC__0
-          ins = [:getlocal_OP__WC__1, ins[1]] if level <= 0
+          ins[0] = :getlocal_OP__WC__1 if level == 0
+          ins[1] += shift if level == 0
+        when :setlocal_OP__WC__1
+          ins.replace([:setlocal, ins[1], 2]) if level <= 1
+          ins[1] += shift if level == 1
         when :getlocal_OP__WC__1
-          ins = [:getlocal, ins[1], 2] if level <= 1
-        when :getlocal
-          ins = [:getlocal, ins[1], ins[2] + 1] if level <= ins[2]
+          ins.replace([:getlocal, ins[1], 2]) if level <= 1
+          ins[1] += shift if level == 1
+        when :setlocal, :getlocal
+          ins[2] += 1 if level <= ins[2]
+          ins[1] += shift if level == ins[2]
         end
         ins
       }
     }
-
-    inner[13].insert(3 + await_i,
-                     [:getlocal_OP__WC__1, stack_val],
-                     [:expandarray, stack_depth, 0], # expand stack
-                     [:getlocal_OP__WC__0, 2])
-    inner[13].insert(2 + await_i,
-                     [:swap],
-                     [:pop],
-                     [:reverse, stack_depth + 1],
-                     [:newarray, stack_depth],
-                     [:setlocal_OP__WC__1, stack_val],
-                     [:getlocal_OP__WC__1, task_val],
-                     [:swap],
-                     [:opt_send_without_block, { mid: :__next__, flag: 16 + 128, orig_argc: 1 }, false],
-                     [:leave])
-
-    transform1(inner) # next await in same level
-
-    # depth: 3
-    #    a b self task -> setlocal(task_val, 0)
-    # -> a b self -> pop
-    # -> a b -> reverse(depth)
-    # -> b a -> newarray(depth)
-    # -> task [ta.b.a] -> send(argc=1)
-    # -> new_task
-    ary[13][await_i, 1] = [
-      [:setlocal_OP__WC__0, task_val],
-      [:pop],
-      [:reverse, stack_depth],
-      [:newarray, stack_depth],
-      [:setlocal_OP__WC__0, stack_val],
-      [:getlocal_OP__WC__0, task_val],
-      [:send, { mid: :__await__, flag: 4 + 128, orig_argc: 0 }, false, inner],
-      [:leave],
-    ]
-  end
-
-  def self.wrap_with_task(ary)
-    wrapper = [
-      [:putnil],
-      [:getconstant, :Async],
-      [:getconstant, :Task],
-      [:swap],
-      [:opt_send_without_block, { mid: :wrap, flag: 128, orig_argc: 1, blockptr: nil }, false]
-    ]
-    body = ary[13]
-    i = body.size - 1
-    while i >= 0
-      body.insert(i, *wrapper) if body[i] == [:leave]
-      i -= 1
-    end
   end
 
   # yields: iseq, level
@@ -169,21 +148,11 @@ module Async
       end }
   end
 
-  def self.add_local_variables(boss, *vars)
-    count = vars.size
-    boss[10].concat(vars)
-    each_iseq(boss) { |ary, level|
-      ary[13].each { |ins|
-        next unless ins.is_a?(Array)
-        case ins[0]
-        when :setlocal_OP__WC__0, :getlocal_OP__WC__0
-          ins[1] += count if level == 0
-        when :setlocal_OP__WC__1, :getlocal_OP__WC__1
-          ins[1] += count if level == 1
-        when :setlocal, :getlocal
-          ins[1] += count if level == ins[2]
-        end
-      }
+  # TODO: jump でスタックが壊れている場合は？
+  def self.calc_stack_depth(body, index)
+    body.take(index).inject(0) { |sum, ins|
+      next sum unless ins.is_a?(Array)
+      sum + stack_increase_size(ins)
     }
   end
 end

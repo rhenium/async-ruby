@@ -47,17 +47,17 @@ module Async
 
     def continue_with
       Task.new {
-        yield __wait__.result
+        yield __wait__
       }
     end
 
     def __await__(&blk)
       if @completed
-        ret = yield result
+        ret = yield self
         while @__next
           if @__next.completed?
             res, @__next = @__next, nil
-            ret = yield res.result
+            ret = yield res
           else
             return @__next.__await__(&blk)
           end
@@ -65,10 +65,10 @@ module Async
         ret
       else
         Task.new {
-          ret = yield __wait__.result
+          ret = yield __wait__
           while @__next
             res, @__next = @__next, nil
-            ret = yield res.__wait__.result
+            ret = yield res.__wait__
           end
           ret
         }

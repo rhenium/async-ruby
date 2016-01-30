@@ -29,5 +29,6 @@ class A
   end
 end
 
-A.new.a(2)
-A.new.a(3)
+a = A.new.a(2)
+b = A.new.a(3)
+a.wait && b.wait
