@@ -5,43 +5,38 @@ require "async/utils"
 
 module Async
   def self.transform(ary)
-    inner = transform_inner(ary)
     new_ary = [
-      *ary.take(4),
-      { arg_size: 1, local_size: ary[4][:local_size] + 3, stack_max: 1 }, # TODO: local_size
-      ary[5], # location
-      ary[6], # file name
-      ary[7], # file path
-      ary[8], # line number
+      *ary[0, 4],
+      { arg_size: 1, local_size: ary[4][:local_size] + 3, stack_max: 2 }, # TODO: local_size
+      *ary[5, 4], # location, filename, path, line
       :method,
-      (ary[10] << :$__await_jump__ << :$__await_stack__ << :$__await_proc__),
+      (ary[10] << :$__await_jump__ << :$__await_stack__ << :$__await_task__),
       ary[11],
       [],
       [
         ary[8], # line
-        [:putspecialobject, 1],
-        [:send, { mid: :lambda, flag: 4, orig_argc: 0 }, false, inner],
+        [:putnil],
+        [:getconstant, :Async],
+        [:getconstant, :CTask],
+        [:send, { mid: :new, flag: 4, orig_argc: 0 }, false, transform1(ary)],
         [:dup],
         [:setlocal_OP__WC__0, 2],
-        [:putnil],
-        [:opt_send_without_block, { mid: :[], flag: 16, orig_argc: 1 }, false],
+        [:opt_send_without_block, { mid: :__continue__, flag: 4 + 128, orig_argc: 0 }, false],
         [:leave]
       ]
     ]
   end
 
-  def self.transform_inner(ary)
+  def self.transform1(ary)
     shift_count = 3
 
     inner = [
       *ary.take(4),
-      { arg_size: 0, local_size: 2, stack_max: ary[4][:stack_max] },
+      { arg_size: 0, local_size: 2, stack_max: ary[4][:stack_max] + 2 },
       "await in #{ary[5]}",
-      ary[6], # file name
-      ary[7], # file path
-      ary[8], # line number
+      *ary[6, 3],
       :block,
-      [:$__await_result__],
+      [:$__await_result_task__],
       { lead_num: 1 },
       ary[12].each { |cc| cc[1] && burylocal(cc[1], shift: shift_count, base_level: 1) },
       ary[13]
@@ -57,34 +52,24 @@ module Async
       ins = body[i]
       next unless ins.is_a?(Array)
       case ins[0]
-      when :leave
-        body.insert(i,
-          [:putnil],
-          [:getconstant, :Async],
-          [:getconstant, :Task],
-          [:swap],
-          [:opt_send_without_block, { mid: :wrap, flag: 128, orig_argc: 1, blockptr: nil }, false])
       when :send, :opt_send_without_block
         next unless ins[1][:mid] == :await && ins[1][:orig_argc] == 1 # TODO
         tags << tag = :"@__await_jump_#{i}__"
         stack_depth = calc_stack_depth(body, i) - 2
-        # depth: 2
-        # -> a b task self -> swap
-        # -> a b self task -> pop
-        # -> a b task -> reverse(depth)
-        # -> task b a -> newarray(depth)
-        # -> task [ta.b.a] -> send(argc=1)
+        # stack_depth: 2
+        #    a b self task
+        # -> ctask task [b.a]
         # -> new_task
         body[i, 1] = [
           [:putobject, tag],
           [:setlocal_OP__WC__1, 4],
           [:swap],
           [:pop],
-          [:reverse, stack_depth + 1],
+          [:getlocal_OP__WC__1, 2],
+          [:reverse, stack_depth + 2],
           [:newarray, stack_depth],
           [:setlocal_OP__WC__1, 3],
-          [:getlocal_OP__WC__1, 2],
-          [:send, { mid: :__await__, flag: 2 + 128, orig_argc: 0 }, false, nil],
+          [:opt_send_without_block, { mid: :__next__, flag: 4 + 128, orig_argc: 1 }, false],
           [:leave],
           tag,
           [:getlocal_OP__WC__1, 3],
@@ -95,10 +80,14 @@ module Async
       end
     end while (i -= 1) > 0
 
-    body.insert(0,
-      [:getlocal_OP__WC__1, 4],
-      [:opt_case_dispatch, tags.flat_map { |t| [t, t] }, :@__await__else__],
-      :@__await__else__)
+    if tags.empty?
+      warn "async method without await: #{ary[5]}"
+    else
+      body.insert(0, *[
+        [:getlocal_OP__WC__1, 4],
+        [:opt_case_dispatch, tags.flat_map { |t| [t, t] }, :@__await__else__],
+        :@__await__else__])
+    end
 
     inner
   end

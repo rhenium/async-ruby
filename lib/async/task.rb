@@ -1,28 +1,13 @@
-require "forwardable"
-
 module Async
-  class Task
-    def initialize(*args, &blk)
-      if blk
-        @__next = nil
-        @completed = false
-        @end = false
-        @value = nil
-        @thread_waiting = []
-        @thread = Thread.new(args) { |args|
-          begin
-            yield *args
-          ensure
-            @end = true
-            while th = @thread_waiting.shift
-              th.wakeup
-            end
-          end
-        }
-      else
-        @value = args.first
-        @completed = true
-      end
+  class BaseTask
+    def initialize
+      @state = :running
+      @thread_waiting = Queue.new
+      @connects = Queue.new
+    end
+
+    def completed?
+      @state != :running
     end
 
     def wait
@@ -30,63 +15,99 @@ module Async
       self
     end
 
-    def __wait__
-      return self if @end
-      @thread_waiting << Thread.current
-      Thread.stop
-      self
-    end
-
     def result
-      return @value if completed?
-      val = @thread.value
-      val = val.result if val.is_a?(Task)
-      @completed = true
-      @value = val
+      case @state
+      when :running
+        @thread_waiting << Thread.current
+        Thread.stop
+        result
+      when :finished
+        @value
+      when :errored
+        raise @value
+      else
+        raise "invalid state"
+      end
     end
 
     def continue_with
       Task.new {
-        yield __wait__
+        yield wait
       }
     end
 
-    def __await__(&blk)
-      if @completed
-        ret = yield self
-        while @__next
-          if @__next.completed?
-            res, @__next = @__next, nil
-            ret = yield res
-          else
-            return @__next.__await__(&blk)
-          end
-        end
-        ret
+    private
+    def wakeup_waiters
+      @thread_waiting.close
+      @connects.close
+      while th = @thread_waiting.pop
+        th.wakeup
+      end
+      while ctask = @connects.pop
+        ctask.send(:__continue__, self)
+      end
+    end
+
+    def __connect__(ctask)
+      case @state
+      when :running
+        @connects << ctask
+      when :finished, :errored
+        ctask.send(:__continue__, self)
       else
-        Task.new {
-          ret = yield __wait__
-          while @__next
-            res, @__next = @__next, nil
-            ret = yield res.__wait__
-          end
-          ret
-        }
+        raise "invalid state"
       end
     end
+  end
 
+  class Task < BaseTask
+    def initialize(*args)
+      raise ArgumentError, "block is required" unless block_given?
+      super()
+      @thread = Thread.new(args) { |args|
+        begin
+          @value = yield *args
+          @state = :finished
+        rescue Exception => e
+          @value = e
+          @state = :errored
+        ensure
+          wakeup_waiters
+        end
+      }
+      @thread.abort_on_exception = true
+    end
+  end
+
+  class CTask < BaseTask
+    def initialize(&proc)
+      super()
+      @proc = proc
+    end
+    private_class_method :new
+
+    private
     def __next__(task)
-      @__next = task
+      @next = task
     end
 
-    def completed?
-      @completed
-    end
-
-    class << self
-      def wrap(val)
-        val.is_a?(Task) ? val : Async::Task.new(val)
+    def __continue__(task = nil)
+      @next = nil
+      ret = @proc[task]
+    rescue Exception
+      @value = $!
+      @state = :errored
+      wakeup_waiters
+    else
+      if @next
+        @next.send(:__connect__, self)
+      else
+        @value = ret
+        @state = :finished
+        wakeup_waiters
       end
+    ensure
+      return self
     end
   end
 end

@@ -64,7 +64,7 @@ class TransformTest < Minitest::Test
     assert (Time.now - start) < 1.05
   end
 
-  def test_two_same
+  def test_same
     klass = Class.new {
       async def t
         js = []; q = []
