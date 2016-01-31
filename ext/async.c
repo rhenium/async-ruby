@@ -12,7 +12,6 @@ struct METHOD {
 // end: proc.c
 
 static VALUE mAsync;
-static VALUE cAsyncTask;
 
 static rb_iseq_t *
 transform(VALUE callable)
@@ -100,5 +99,4 @@ Init_ext(void)
     rb_define_private_method(rb_mKernel, "async", kern_async, -1);
 
     mAsync = rb_define_module("Async");
-    cAsyncTask = rb_define_class_under(mAsync, "Task", rb_cObject);
 }
